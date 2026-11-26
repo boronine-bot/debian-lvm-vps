@@ -43,7 +43,7 @@ does not keep Actions artifacts. The workflow reads the repository secret
 base=https://deb.debian.org/debian/dists/trixie/main/installer-amd64/current/images
 curl -fLO "$base/SHA256SUMS"
 curl -fL -o mini.iso "$base/netboot/mini.iso"
-grep ' ./netboot/mini.iso$' SHA256SUMS | sed 's| ./netboot/mini.iso$|  mini.iso|' | sha256sum -c -
+awk '$2 == "./netboot/mini.iso" { print $1, " mini.iso"; found = 1 } END { exit !found }' SHA256SUMS | sha256sum -c -
 
 python3 scripts/build-iso.py \
     mini.iso \
