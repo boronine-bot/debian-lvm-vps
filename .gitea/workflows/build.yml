@@ -2,7 +2,8 @@ name: Build ISO
 
 # Manual only. The Debian netinst download and the remastered image are about
 # 1 GB each, and neither should accumulate on a runner. The job uses a
-# disposable no-dind worker, and the image is kept only as a one-day artifact.
+# disposable no-dind worker. The image is attached to one release, which each
+# run replaces, because this Gitea stores no Actions artifacts.
 on:
   workflow_dispatch:
 
@@ -55,12 +56,40 @@ jobs:
         if: always()
         run: rm -f -- "${RUNNER_TEMP}/debian-13.8.0-amd64-netinst.iso" "${RUNNER_TEMP}/SHA256SUMS"
 
-      - name: Upload the remastered ISO
-        uses: actions/upload-artifact@v3
-        with:
-          name: debian-13-lvm
-          path: |
-            ${{ runner.temp }}/debian-13-lvm.iso
-            ${{ runner.temp }}/debian-13-lvm.iso.sha256
-          if-no-files-found: error
-          retention-days: 1
+      - name: Publish the ISO as a release
+        env:
+          GITEA_TOKEN: ${{ gitea.token }}
+          GITEA_SERVER: ${{ gitea.server_url }}
+          REPOSITORY: ${{ gitea.repository }}
+        run: |
+          set -euo pipefail
+          api="$GITEA_SERVER/api/v1/repos/$REPOSITORY"
+          auth=(-H "Authorization: token $GITEA_TOKEN")
+          tag=debian-13-lvm
+          status="$(curl -sS -o release.json -w '%{http_code}' "${auth[@]}" "$api/releases/tags/$tag")"
+          if [ "$status" = "404" ]; then
+            curl -fsS -X POST "${auth[@]}" -H 'Content-Type: application/json' \
+              -d '{"tag_name":"debian-13-lvm","name":"Debian 13 LVM ISO","prerelease":true,"body":"Replaced by every manual build."}' \
+              "$api/releases" -o release.json
+          elif [ "$status" != "200" ]; then
+            echo "Could not read the $tag release (HTTP $status)." >&2
+            exit 1
+          fi
+          release_id="$(python3 -c 'import json; print(json.load(open("release.json"))["id"])')"
+          python3 - <<'PY'
+          import json, os, urllib.request
+          release = json.load(open("release.json"))
+          base = (f'{os.environ["GITEA_SERVER"]}/api/v1/repos/'
+                  f'{os.environ["REPOSITORY"]}/releases/{release["id"]}')
+          headers = {"Authorization": f'token {os.environ["GITEA_TOKEN"]}'}
+          for asset in json.load(urllib.request.urlopen(
+                  urllib.request.Request(f"{base}/assets", headers=headers))):
+              urllib.request.urlopen(urllib.request.Request(
+                  f'{base}/assets/{asset["id"]}', headers=headers, method="DELETE"))
+          PY
+          cd "$RUNNER_TEMP"
+          for file in debian-13-lvm.iso debian-13-lvm.iso.sha256; do
+            curl -fS -X POST "${auth[@]}" -F "attachment=@$file" \
+              "$api/releases/$release_id/assets" -o /dev/null
+          done
+          echo "Published $tag"
