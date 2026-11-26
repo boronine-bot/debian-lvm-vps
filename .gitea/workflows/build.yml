@@ -16,10 +16,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install xorriso
+      - name: Fetch a static xorriso
+        # The runner has no sudo and no package installation. This is GNU
+        # xorriso 1.5.6.pl02, built with its bundled libraries and with
+        # readline, zlib, and libacl disabled, so it needs only libc.
+        working-directory: ${{ runner.temp }}
         run: |
-          sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xorriso
+          set -euo pipefail
+          curl -fL --retry 3 -o xorriso \
+            https://github.com/boronine-bot/debian-lvm-vps/releases/download/xorriso-1.5.6.pl02/xorriso-static
+          echo '08285690bf6260d34e89d84a27fe2455caf63f0c0cbe4aff1544ad17cccd40c6  xorriso' | sha256sum -c -
+          chmod 755 xorriso
 
       - name: Download and verify the Debian netinst ISO
         working-directory: ${{ runner.temp }}
@@ -40,7 +47,7 @@ jobs:
             echo 'Set the SSH_PUBLIC_KEY repository secret to one OpenSSH public key.' >&2
             exit 1
           fi
-          python3 scripts/build-iso.py \
+          XORRISO="${RUNNER_TEMP}/xorriso" python3 scripts/build-iso.py \
             "${RUNNER_TEMP}/debian-13.8.0-amd64-netinst.iso" \
             "${RUNNER_TEMP}/debian-13-lvm.iso"
 

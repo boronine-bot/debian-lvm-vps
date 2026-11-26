@@ -20,6 +20,7 @@ APPEND = (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
+XORRISO = os.environ.get("XORRISO", "xorriso")
 
 
 def run(command, **kwargs):
@@ -29,7 +30,7 @@ def run(command, **kwargs):
 def boot_arguments(source: Path) -> list[str]:
     """Replay the source ISO's boot layout with a new volume id."""
     result = subprocess.run(
-        ["xorriso", "-indev", str(source), "-report_el_torito", "as_mkisofs"],
+        [XORRISO, "-indev", str(source), "-report_el_torito", "as_mkisofs"],
         check=True, capture_output=True, text=True,
     )
     arguments = []
@@ -113,7 +114,7 @@ def refresh_checksums(tree: Path) -> None:
 def build(source: Path, output: Path, public_key: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="debian-lvm-") as temporary:
         tree = Path(temporary) / "tree"
-        run(["xorriso", "-osirrox", "on", "-indev", str(source), "-extract", "/", str(tree)])
+        run([XORRISO, "-osirrox", "on", "-indev", str(source), "-extract", "/", str(tree)])
         for path in tree.rglob("*"):
             path.chmod(path.stat().st_mode | 0o200)
 
@@ -130,7 +131,7 @@ def build(source: Path, output: Path, public_key: Path) -> None:
 
         output.parent.mkdir(parents=True, exist_ok=True)
         command = [
-            "xorriso", "-as", "mkisofs", "-o", str(output), "-r",
+            XORRISO, "-as", "mkisofs", "-o", str(output), "-r",
             *boot_arguments(source), str(tree),
         ]
         run(command)
