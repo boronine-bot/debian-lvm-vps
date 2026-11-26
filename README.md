@@ -27,7 +27,13 @@ backup snapshot wants another 5 GiB of writes before it fills up.
 
 ## Build the ISO
 
-The build needs `xorriso` and Python 3. It downloads nothing.
+The build needs `xorriso` and Python 3. It downloads nothing. The same build
+runs on Gitea Actions: open **Actions → Build ISO → Run workflow**. It runs
+only when dispatched, on a disposable runner that is removed with the job.
+The image is kept as an artifact named `debian-13-lvm` for one day, so it is
+not stored in the repository or on a long-lived runner. Download it from the
+run before it expires. The workflow reads the repository secret
+`SSH_PUBLIC_KEY`, which must be exactly one OpenSSH public key.
 
 ```sh
 curl -fLO https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/SHA256SUMS

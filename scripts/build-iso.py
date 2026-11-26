@@ -7,6 +7,7 @@ not start a virtual machine and it does not talk to Ginernet.
 
 import argparse
 import hashlib
+import os
 import shutil
 import subprocess
 import sys
@@ -138,18 +139,33 @@ def build(source: Path, output: Path, public_key: Path) -> None:
     print(f"{digest}  {output}")
 
 
+def public_key(argument: Path | None) -> Path:
+    """Read one OpenSSH public key from a file or SSH_PUBLIC_KEY."""
+    if argument is not None:
+        text = argument.read_text()
+        source = argument
+    else:
+        text = os.environ.get("SSH_PUBLIC_KEY", "")
+        source = "SSH_PUBLIC_KEY"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) != 1 or not lines[0].startswith(("ssh-ed25519 ", "ssh-rsa ", "ecdsa-sha2-")):
+        sys.exit(f"{source} must contain exactly one OpenSSH public key")
+    path = Path(tempfile.mkdtemp(prefix="ssh-key-")) / "authorized_key"
+    path.write_text(lines[0] + "\n")
+    path.chmod(0o600)
+    return path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="official Debian amd64 netinst ISO")
     parser.add_argument("output", type=Path, help="where to write the remastered ISO")
-    parser.add_argument("--ssh-public-key", required=True, type=Path)
+    parser.add_argument("--ssh-public-key", type=Path,
+                        help="public key file; omit to read SSH_PUBLIC_KEY")
     args = parser.parse_args()
-    key = args.ssh_public_key.read_text().strip()
-    if not key.startswith(("ssh-ed25519 ", "ssh-rsa ", "ecdsa-sha2-")):
-        sys.exit(f"{args.ssh_public_key} is not an OpenSSH public key")
     if not args.source.is_file():
         sys.exit(f"source ISO not found: {args.source}")
-    build(args.source, args.output, args.ssh_public_key)
+    build(args.source, args.output, public_key(args.ssh_public_key))
     return 0
 
 

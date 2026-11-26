@@ -1,0 +1,59 @@
+name: Build ISO
+
+# Manual only. The Debian netinst download and the remastered image are about
+# 1 GB each, and neither should accumulate on a runner. The job uses a
+# disposable no-dind worker, and the image is kept only as a one-day artifact.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Debian 13 LVM ISO
+    runs-on: ephemeral-no-dind-${{ gitea.repository_id }}-${{ gitea.run_id }}-${{ gitea.run_attempt }}-iso
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install xorriso
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xorriso
+
+      - name: Download and verify the Debian netinst ISO
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o SHA256SUMS \
+            https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/SHA256SUMS
+          curl -fL --retry 3 -o debian-13.8.0-amd64-netinst.iso \
+            https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.8.0-amd64-netinst.iso
+          grep ' debian-13.8.0-amd64-netinst.iso$' SHA256SUMS | sha256sum -c -
+
+      - name: Remaster the ISO
+        env:
+          SSH_PUBLIC_KEY: ${{ secrets.SSH_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SSH_PUBLIC_KEY}" ]; then
+            echo 'Set the SSH_PUBLIC_KEY repository secret to one OpenSSH public key.' >&2
+            exit 1
+          fi
+          python3 scripts/build-iso.py \
+            "${RUNNER_TEMP}/debian-13.8.0-amd64-netinst.iso" \
+            "${RUNNER_TEMP}/debian-13-lvm.iso"
+
+      - name: Remove the Debian download
+        if: always()
+        run: rm -f -- "${RUNNER_TEMP}/debian-13.8.0-amd64-netinst.iso" "${RUNNER_TEMP}/SHA256SUMS"
+
+      - name: Upload the remastered ISO
+        uses: actions/upload-artifact@v3
+        with:
+          name: debian-13-lvm
+          path: |
+            ${{ runner.temp }}/debian-13-lvm.iso
+            ${{ runner.temp }}/debian-13-lvm.iso.sha256
+          if-no-files-found: error
+          retention-days: 1
