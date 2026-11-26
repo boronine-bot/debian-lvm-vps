@@ -1,9 +1,14 @@
 # Debian 13 VPS image
 
-Builds a Debian 13 (trixie) amd64 netinst ISO that installs itself: ext4
-root on LVM, free extents reserved for a short-lived read-only snapshot,
-OpenSSH, and Docker. Nothing here creates a Ginernet VPS or mounts the ISO.
-Those panel steps are marked TODO below.
+Builds a Debian 13 (trixie) amd64 installer ISO that installs itself: a
+minimal server with ext4 root on LVM, free extents reserved for a short-lived
+read-only snapshot, OpenSSH, and Docker. Nothing here creates a Ginernet VPS
+or mounts the ISO. Those panel steps are marked TODO below.
+
+The source is Debian's 64 MB netboot `mini.iso`, not the 700 MB netinst image.
+The netinst image is large because it carries a package pool; this installer
+does not. The installed system is a normal minimal Debian server plus the
+packages named below, and it is much smaller than either ISO.
 
 ## What the installed system looks like
 
@@ -30,28 +35,28 @@ backup snapshot wants another 5 GiB of writes before it fills up.
 The build needs `xorriso` and Python 3. It downloads nothing. The same build
 runs on Gitea Actions: open **Actions → Build ISO → Run workflow**. It runs
 only when dispatched, on a disposable runner that is removed with the job.
-The image is kept as an artifact named `debian-13-lvm` for one day, so it is
-not stored in the repository or on a long-lived runner. Download it from the
-run before it expires. The workflow reads the repository secret
+The result replaces the assets on the `debian-13-lvm` release; this Gitea
+does not keep Actions artifacts. The workflow reads the repository secret
 `SSH_PUBLIC_KEY`, which must be exactly one OpenSSH public key.
 
 ```sh
-curl -fLO https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/SHA256SUMS
-curl -fLO https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.8.0-amd64-netinst.iso
-grep debian-13.8.0-amd64-netinst.iso SHA256SUMS | sha256sum -c -
+base=https://deb.debian.org/debian/dists/trixie/main/installer-amd64/current/images
+curl -fLO "$base/SHA256SUMS"
+curl -fL -o mini.iso "$base/netboot/mini.iso"
+grep ' ./netboot/mini.iso$' SHA256SUMS | sed 's| ./netboot/mini.iso$|  mini.iso|' | sha256sum -c -
 
 python3 scripts/build-iso.py \
-    debian-13.8.0-amd64-netinst.iso \
+    mini.iso \
     out/debian-13-lvm.iso \
     --ssh-public-key ~/.ssh/id_ed25519.pub
 ```
 
 Check `out/debian-13-lvm.iso.sha256` before uploading. The source must be the
-13.8.0 amd64 netinst image, or a later image with the same isolinux and GRUB
-layout. The builder was checked against 13.8.0: both the BIOS and UEFI boot
-entries start the text installer with the preseed, and the public key is
-stored at `/preseed/authorized_key`. This environment has no KVM, so the
-install itself has not been booted.
+current trixie amd64 netboot `mini.iso`. Both BIOS and UEFI boot entries start
+the text installer with the preseed, and the public key is stored at
+`/preseed/authorized_key`. This environment has no KVM, so the install itself
+has not been booted. The installed system downloads its packages from
+`deb.debian.org`, so the VPS needs network access during installation.
 
 The image wipes the first disk it finds. Booting it on a machine that already
 has data destroys that disk.

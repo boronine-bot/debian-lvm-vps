@@ -1,9 +1,9 @@
 name: Build ISO
 
-# Manual only. The Debian netinst download and the remastered image are about
-# 1 GB each, and neither should accumulate on a runner. The job uses a
-# disposable no-dind worker. The image is attached to one release, which each
-# run replaces, because this Gitea stores no Actions artifacts.
+# Manual only. The source is the 64 MB netboot installer, not the 700 MB
+# netinst image: it contains no package pool. The job uses a disposable
+# no-dind worker, and each run replaces the one release because this Gitea
+# stores no Actions artifacts.
 on:
   workflow_dispatch:
 
@@ -29,15 +29,14 @@ jobs:
           echo '08285690bf6260d34e89d84a27fe2455caf63f0c0cbe4aff1544ad17cccd40c6  xorriso' | sha256sum -c -
           chmod 755 xorriso
 
-      - name: Download and verify the Debian netinst ISO
+      - name: Download and verify the Debian netboot installer
         working-directory: ${{ runner.temp }}
         run: |
           set -euo pipefail
-          curl -fL --retry 3 -o SHA256SUMS \
-            https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/SHA256SUMS
-          curl -fL --retry 3 -o debian-13.8.0-amd64-netinst.iso \
-            https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.8.0-amd64-netinst.iso
-          grep ' debian-13.8.0-amd64-netinst.iso$' SHA256SUMS | sha256sum -c -
+          base=https://deb.debian.org/debian/dists/trixie/main/installer-amd64/current/images
+          curl -fL --retry 3 -o SHA256SUMS "$base/SHA256SUMS"
+          curl -fL --retry 3 -o mini.iso "$base/netboot/mini.iso"
+          grep ' ./netboot/mini.iso$' SHA256SUMS | sed 's| ./netboot/mini.iso$|  mini.iso|' | sha256sum -c -
 
       - name: Remaster the ISO
         env:
@@ -49,12 +48,12 @@ jobs:
             exit 1
           fi
           XORRISO="${RUNNER_TEMP}/xorriso" python3 scripts/build-iso.py \
-            "${RUNNER_TEMP}/debian-13.8.0-amd64-netinst.iso" \
+            "${RUNNER_TEMP}/mini.iso" \
             "${RUNNER_TEMP}/debian-13-lvm.iso"
 
       - name: Remove the Debian download
         if: always()
-        run: rm -f -- "${RUNNER_TEMP}/debian-13.8.0-amd64-netinst.iso" "${RUNNER_TEMP}/SHA256SUMS"
+        run: rm -f -- "${RUNNER_TEMP}/mini.iso" "${RUNNER_TEMP}/SHA256SUMS"
 
       - name: Publish the ISO as a release
         env:

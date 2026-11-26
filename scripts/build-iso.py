@@ -64,33 +64,48 @@ def split_xorriso(line: str) -> list[str]:
     return arguments
 
 
-def patch_isolinux(tree: Path) -> None:
-    (tree / "isolinux/isolinux.cfg").write_text(
+def boot_paths(tree: Path) -> tuple[str, str]:
+    """Kernel and initrd paths differ between netinst and the netboot mini image."""
+    candidates = (("/linux", "/initrd.gz"), ("/install.amd/vmlinuz", "/install.amd/initrd.gz"))
+    for kernel, initrd in candidates:
+        if (tree / kernel[1:]).is_file() and (tree / initrd[1:]).is_file():
+            return kernel, initrd
+    raise ValueError("Debian installer kernel and initrd were not found on the ISO")
+
+
+def patch_isolinux(tree: Path, kernel: str, initrd: str) -> None:
+    config = tree / "isolinux.cfg"
+    if not config.exists():
+        config = tree / "isolinux/isolinux.cfg"
+    if not config.exists():
+        raise ValueError("Debian isolinux configuration was not found on the ISO")
+    config.write_text(
         "# D-I config version 2.0\n"
         "path\n"
         "prompt 0\n"
         "timeout 1\n"
         "default auto\n"
         "label auto\n"
-        "    kernel /install.amd/vmlinuz\n"
-        f"    append initrd=/install.amd/initrd.gz {APPEND}\n"
+        f"    kernel {kernel}\n"
+        f"    append initrd={initrd} {APPEND}\n"
     )
 
 
-def patch_grub(tree: Path) -> None:
+def patch_grub(tree: Path, kernel: str, initrd: str) -> None:
     config = tree / "boot/grub/grub.cfg"
     original = config.read_text()
-    preamble, separator, _ = original.partition("set theme=")
+    marker = "insmod play\n" if "insmod play\n" in original else "set theme="
+    preamble, separator, _ = original.partition(marker)
     if not separator:
-        raise ValueError("Debian GRUB configuration has no theme marker to replace")
+        raise ValueError("Debian GRUB configuration has no recognizable menu marker")
     config.write_text(
         preamble
         + "set default=0\n"
         + "set timeout=1\n"
         + "menuentry 'Automated Debian install' {\n"
         + "    set background_color=black\n"
-        + f"    linux /install.amd/vmlinuz {APPEND}\n"
-        + "    initrd /install.amd/initrd.gz\n"
+        + f"    linux {kernel} {APPEND}\n"
+        + f"    initrd {initrd}\n"
         + "}\n"
     )
 
@@ -115,7 +130,7 @@ def build(source: Path, output: Path, public_key: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="debian-lvm-") as temporary:
         tree = Path(temporary) / "tree"
         run([XORRISO, "-osirrox", "on", "-indev", str(source), "-extract", "/", str(tree)])
-        for path in tree.rglob("*"):
+        for path in (tree, *tree.rglob("*")):
             path.chmod(path.stat().st_mode | 0o200)
 
         preseed = tree / "preseed"
@@ -125,8 +140,9 @@ def build(source: Path, output: Path, public_key: Path) -> None:
         (preseed / "late-command").chmod(0o755)
         shutil.copy(public_key, preseed / "authorized_key")
 
-        patch_isolinux(tree)
-        patch_grub(tree)
+        kernel, initrd = boot_paths(tree)
+        patch_isolinux(tree, kernel, initrd)
+        patch_grub(tree, kernel, initrd)
         refresh_checksums(tree)
 
         output.parent.mkdir(parents=True, exist_ok=True)
